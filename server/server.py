@@ -1,7 +1,6 @@
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 import subprocess
-import uuid
 import os
 
 app = FastAPI()
@@ -15,29 +14,47 @@ class TTSRequest(BaseModel):
     pitch: str = Query("medium", enum=["low", "medium", "high"])
     seed: int = 12345
     speed: str = Query("normal", enum=["very_low", "low", "normal", "high", "very_high"])
-    output_filename: str | None = None  # New optional parameter
+    output_filename: str | None = None
 
 @app.post("/infer")
 def run_tts(req: TTSRequest):
+    print(req)
+
+    if not req.output_filename:
+        return {
+            "status": "error",
+            "error": "output_filename is required to verify the output file exists."
+        }
+
+    output_wav = f"{req.output_filename}.wav"
+
     command = [
         "python", CLI_SCRIPT_PATH,
         "--text", req.text,
         "--gender", req.gender,
         "--pitch", req.pitch,
         "--seed", str(req.seed),
-        "--speed", req.speed
+        "--speed", req.speed,
+        "--output_filename", req.output_filename
     ]
-
-    if req.output_filename:
-        command += ["--output_filename", req.output_filename]
 
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True)
+
+        # Check if the resulting .wav file exists
+        if not os.path.isfile(output_wav):
+            return {
+                "status": "error",
+                "error": f"Output file {output_wav} not found after synthesis",
+                "exit_code": 1
+            }
+
         return {
             "status": "success",
             "output": result.stdout.strip(),
-            "output_filename": req.output_filename or "auto-generated"
+            "output_filename": output_wav
         }
+
     except subprocess.CalledProcessError as e:
         return {
             "status": "error",

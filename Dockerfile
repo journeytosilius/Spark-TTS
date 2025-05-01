@@ -6,6 +6,7 @@ WORKDIR /app
 
 # Install system packages including bash and SSH
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
     build-essential \
     bash \
     openssh-server \
