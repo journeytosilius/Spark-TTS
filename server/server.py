@@ -1,9 +1,14 @@
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 import subprocess
+import uuid
 import os
+import logging
 
 app = FastAPI()
+
+# Setup basic logging
+logging.basicConfig(level=logging.INFO)
 
 CLI_SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "..", "cli", "tts_cli.py")
 CLI_SCRIPT_PATH = os.path.abspath(CLI_SCRIPT_PATH)
@@ -18,49 +23,46 @@ class TTSRequest(BaseModel):
 
 @app.post("/infer")
 def run_tts(req: TTSRequest):
-    print(req)
-
-    if not req.output_filename:
-        return {
-            "status": "error",
-            "error": "output_filename is required to verify the output file exists."
-        }
-
-    output_wav = f"{req.output_filename}.wav"
-
     command = [
         "python", CLI_SCRIPT_PATH,
         "--text", req.text,
         "--gender", req.gender,
         "--pitch", req.pitch,
         "--seed", str(req.seed),
-        "--speed", req.speed,
-        "--output_filename", req.output_filename
+        "--speed", req.speed
     ]
+
+    if req.output_filename:
+        command += ["--output_filename", req.output_filename]
+
+    logging.info(f"🚀 Running command: {' '.join(command)}")
 
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True)
+        logging.info(f"✅ TTS success - stdout:\n{result.stdout}")
+        if result.stderr:
+            logging.warning(f"⚠️ TTS stderr:\n{result.stderr}")
 
-        # Check if the resulting .wav file exists
-        if not os.path.isfile(output_wav):
-            return {
-                "status": "error",
-                "error": f"Output file {output_wav} not found after synthesis",
-                "exit_code": 1
-            }
+        # Optional: check if the file was actually created
+        expected_file = req.output_filename or "output.wav"
+        if not os.path.exists(expected_file):
+            logging.error(f"❌ Output file not found: {expected_file}")
+            return {"status": "error", "error": "Output file was not created"}
 
         return {
             "status": "success",
             "output": result.stdout.strip(),
-            "output_filename": output_wav
+            "output_filename": expected_file
         }
 
     except subprocess.CalledProcessError as e:
+        logging.error(f"❌ Subprocess failed - stderr:\n{e.stderr}")
         return {
             "status": "error",
             "error": e.stderr.strip() if e.stderr else str(e),
             "exit_code": e.returncode
         }
+
 
 
 # curl -X POST http://localhost:8091/infer \
