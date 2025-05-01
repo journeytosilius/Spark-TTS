@@ -4,22 +4,25 @@ FROM python:3.12-slim
 # Set working directory inside the container
 WORKDIR /app
 
-# Install system dependencies (if needed)
+# Install system packages including bash and SSH
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    bash \
+    openssh-server \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python requirements file
-COPY requirements.txt .
+# Set up SSH
+RUN mkdir /var/run/sshd && echo 'root:root' | chpasswd
 
-# Install Python dependencies
+# Copy requirements and install Python deps
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the application code
+# Copy your full app
 COPY . .
 
-# Expose FastAPI port
-EXPOSE 8000
+# Expose FastAPI and SSH ports
+EXPOSE 8000 22
 
-# Run FastAPI app (adjust if your file is not named main.py or app.py)
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start both SSH and FastAPI
+CMD ["bash", "-c", "service ssh start && uvicorn server.server:app --host 0.0.0.0 --port 8000"]
