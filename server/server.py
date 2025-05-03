@@ -1,17 +1,16 @@
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
 import subprocess
-import uuid
 import os
 import logging
 
 app = FastAPI()
-
-# Setup basic logging
 logging.basicConfig(level=logging.INFO)
 
-CLI_SCRIPT_PATH = os.path.join(os.path.dirname(__file__), "..", "cli", "tts_cli.py")
-CLI_SCRIPT_PATH = os.path.abspath(CLI_SCRIPT_PATH)
+CLI_SCRIPT_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "cli", "tts_cli.py"))
+OUTPUT_AUDIO_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "example", "results")
+)
 
 class TTSRequest(BaseModel):
     text: str
@@ -19,6 +18,7 @@ class TTSRequest(BaseModel):
     pitch: str = Query("medium", enum=["low", "medium", "high"])
     seed: int = 12345
     speed: str = Query("normal", enum=["very_low", "low", "normal", "high", "very_high"])
+    emotion: str = Query("NEUTRAL")
     output_filename: str | None = None
 
 @app.post("/infer")
@@ -29,40 +29,37 @@ def run_tts(req: TTSRequest):
         "--gender", req.gender,
         "--pitch", req.pitch,
         "--seed", str(req.seed),
-        "--speed", req.speed
+        "--speed", req.speed,
+        "--emotion", req.emotion
     ]
 
-    if req.output_filename:
-        command += ["--output_filename", req.output_filename]
+    output_filename_base = req.output_filename or "output"
+    command += ["--output_filename", output_filename_base]
+
+    expected_file_path = os.path.join(OUTPUT_AUDIO_PATH, output_filename_base)
 
     logging.info(f"🚀 Running command: {' '.join(command)}")
 
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True)
-        logging.info(f"✅ TTS success - stdout:\n{result.stdout}")
-        if result.stderr:
-            logging.warning(f"⚠️ TTS stderr:\n{result.stderr}")
 
-        # Optional: check if the file was actually created
-        expected_file = req.output_filename or "output.wav"
-        if not os.path.exists(expected_file):
-            logging.error(f"❌ Output file not found: {expected_file}")
-            return {"status": "error", "error": "Output file was not created"}
+        if not os.path.exists(expected_file_path):
+            logging.error(f"❌ Output file not found at: {expected_file_path}")
+            raise HTTPException(status_code=500, detail="TTS succeeded but output file was not found")
 
+        logging.info("✅ TTS process completed successfully")
         return {
             "status": "success",
             "output": result.stdout.strip(),
-            "output_filename": expected_file
+            "output_filename": os.path.basename(expected_file_path)
         }
 
     except subprocess.CalledProcessError as e:
-        logging.error(f"❌ Subprocess failed - stderr:\n{e.stderr}")
-        return {
-            "status": "error",
-            "error": e.stderr.strip() if e.stderr else str(e),
-            "exit_code": e.returncode
-        }
-
+        logging.error(f"❌ Subprocess failed\nSTDOUT:\n{e.stdout}\nSTDERR:\n{e.stderr}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTS generation failed:\n{e.stderr.strip() if e.stderr else e.stdout.strip()}"
+        )
 
 
 # curl -X POST http://localhost:8091/infer \
