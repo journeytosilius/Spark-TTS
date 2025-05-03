@@ -30,7 +30,7 @@ def run_tts(req: TTSRequest):
         "--pitch", req.pitch,
         "--seed", str(req.seed),
         "--speed", req.speed,
-        "--emotion", req.emotion
+        # "--emotion", req.emotion
     ]
 
     output_filename_base = req.output_filename or "output"
